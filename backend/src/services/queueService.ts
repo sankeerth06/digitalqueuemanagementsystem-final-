@@ -4,8 +4,7 @@ import { getIO, SOCKET_EVENTS } from '../sockets/index';
 import { pushNotification } from './notificationService';
 import { ApiError } from '../utils/ApiError';
 
-const ACTIVE_STATUSES = ['waiting', 'preparing'] as const;
-
+const ACTIVE_STATUSES = ['waiting', 'preparing', 'ready'];
 /** Generates the next sequential token code for today, e.g. A001, A002 ... Z999 then wraps. */
 export async function generateTokenCode(): Promise<{ code: string; sequence: number }> {
   const startOfDay = new Date();
