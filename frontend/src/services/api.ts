@@ -2,7 +2,7 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/authStore';
 
 export const api = axios.create({
-  baseURL: '/api',
+baseURL: `${import.meta.env.VITE_API_BASE_URL || ''}/api`,
   withCredentials: true,
 });
 
@@ -18,11 +18,11 @@ let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
   try {
-    const res = await axios.post(
-      '/api/auth/refresh',
-      {},
-      { withCredentials: true }
-    );
+   const res = await axios.post(
+  `${import.meta.env.VITE_API_BASE_URL}/api/auth/refresh`,
+  {},
+  { withCredentials: true }
+);
     const newToken = res.data?.data?.accessToken as string;
     useAuthStore.getState().setSession(res.data.data.user, newToken);
     return newToken;
