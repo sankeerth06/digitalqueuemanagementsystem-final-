@@ -25,8 +25,9 @@ export function StaffDashboard() {
     queryFn: async () => (await api.get('/settings')).data.data.settings as SystemSettings,
   });
 
-  const waiting = queue?.filter((t) => t.status === 'waiting') ?? [];
-  const preparing = queue?.filter((t) => t.status === 'preparing') ?? [];
+const waiting = queue?.filter((t) => t.status === 'waiting') ?? [];
+const preparing = queue?.filter((t) => t.status === 'preparing') ?? [];
+const ready = queue?.filter((t) => t.status === 'ready') ?? [];
 
   const togglePause = async () => {
     if (settings?.queuePaused) await api.post('/settings/resume');
