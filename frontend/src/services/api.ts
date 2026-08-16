@@ -1,16 +1,20 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { useAuthStore } from '../store/authStore';
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+
 export const api = axios.create({
-baseURL: `${import.meta.env.VITE_API_BASE_URL || ''}/api`,
+  baseURL: `${API_BASE_URL}/api`,
   withCredentials: true,
 });
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   const token = useAuthStore.getState().accessToken;
+
   if (token) {
     config.headers.set('Authorization', `Bearer ${token}`);
   }
+
   return config;
 });
 
@@ -18,13 +22,20 @@ let refreshPromise: Promise<string | null> | null = null;
 
 async function refreshAccessToken(): Promise<string | null> {
   try {
-   const res = await axios.post(
-  `${import.meta.env.VITE_API_BASE_URL}/api/auth/refresh`,
-  {},
-  { withCredentials: true }
-);
+    const res = await axios.post(
+      `${API_BASE_URL}/api/auth/refresh`,
+      {},
+      {
+        withCredentials: true,
+      }
+    );
+
     const newToken = res.data?.data?.accessToken as string;
-    useAuthStore.getState().setSession(res.data.data.user, newToken);
+
+    useAuthStore
+      .getState()
+      .setSession(res.data.data.user, newToken);
+
     return newToken;
   } catch {
     useAuthStore.getState().clearSession();
@@ -34,28 +45,50 @@ async function refreshAccessToken(): Promise<string | null> {
 
 api.interceptors.response.use(
   (res) => res,
+
   async (error: AxiosError) => {
-    const original = error.config as (InternalAxiosRequestConfig & { _retry?: boolean }) | undefined;
-    if (error.response?.status === 401 && original && !original._retry && !original.url?.includes('/auth/')) {
+    const original = error.config as
+      | (InternalAxiosRequestConfig & { _retry?: boolean })
+      | undefined;
+
+    if (
+      error.response?.status === 401 &&
+      original &&
+      !original._retry &&
+      !original.url?.includes('/auth/')
+    ) {
       original._retry = true;
+
       if (!refreshPromise) {
         refreshPromise = refreshAccessToken().finally(() => {
           refreshPromise = null;
         });
       }
+
       const newToken = await refreshPromise;
+
       if (newToken) {
-        original.headers.set('Authorization', `Bearer ${newToken}`);
+        original.headers.set(
+          'Authorization',
+          `Bearer ${newToken}`
+        );
+
         return api(original);
       }
     }
+
     return Promise.reject(error);
   }
 );
 
 export function extractErrorMessage(error: unknown): string {
   if (axios.isAxiosError(error)) {
-    return (error.response?.data as { message?: string })?.message || error.message || 'Something went wrong';
+    return (
+      (error.response?.data as { message?: string })?.message ||
+      error.message ||
+      'Something went wrong'
+    );
   }
+
   return 'Something went wrong';
 }
