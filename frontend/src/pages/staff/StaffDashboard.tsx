@@ -109,6 +109,50 @@ const ready = queue?.filter((t) => t.status === 'ready') ?? [];
                 </div>
               </motion.div>
             ))}
+            <section>
+  <h2 className="mb-3 text-sm font-semibold text-ink-600/70 dark:text-white/50">
+    Ready for pickup ({ready.length})
+  </h2>
+
+  {!ready.length && (
+    <EmptyState
+      icon={CheckCircle2}
+      title="No orders ready"
+      description="Orders marked ready will appear here."
+    />
+  )}
+
+  <div className="space-y-2">
+    {ready.map((t) => (
+      <motion.div
+        key={t._id}
+        initial={{ opacity: 0, x: 8 }}
+        animate={{ opacity: 1, x: 0 }}
+        className="card-surface flex items-center justify-between p-4"
+      >
+        <div>
+          <span className="font-mono font-semibold">{t.tokenCode}</span>
+
+          <Badge tone="coral" className="ml-2">
+            Ready for pickup
+          </Badge>
+
+          <p className="text-xs text-ink-600/60 dark:text-white/50">
+            {t.items.map((i) => `${i.quantity}× ${i.name}`).join(', ')}
+          </p>
+        </div>
+
+        <Button
+          size="sm"
+          onClick={() => complete.mutate(t._id)}
+          loading={complete.isPending}
+        >
+          Complete
+        </Button>
+      </motion.div>
+    ))}
+  </div>
+</section>
           </div>
         </section>
       </div>
