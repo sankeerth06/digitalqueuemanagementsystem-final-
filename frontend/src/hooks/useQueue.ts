@@ -11,6 +11,12 @@ interface ActiveTokenResponse {
   peopleAhead: number | null;
 }
 
+export interface ActiveTokenEntry {
+  token: Token;
+  position: number | null;
+  peopleAhead: number | null;
+}
+
 export function useMyActiveToken() {
   const queryClient = useQueryClient();
   const query = useQuery({
@@ -26,6 +32,33 @@ export function useMyActiveToken() {
     const socket = getSocket();
     if (!socket) return;
     const handler = () => queryClient.invalidateQueries({ queryKey: ['my-active-token'] });
+    socket.on('queue:updated', handler);
+    socket.on('token:called', handler);
+    return () => {
+      socket.off('queue:updated', handler);
+      socket.off('token:called', handler);
+    };
+  }, [queryClient]);
+
+  return query;
+}
+
+// NEW: all active tokens of the student (no limit)
+export function useMyActiveTokens() {
+  const queryClient = useQueryClient();
+  const query = useQuery({
+    queryKey: ['my-active-tokens'],
+    queryFn: async () => {
+      const res = await api.get('/queue/tokens/mine/active-all');
+      return res.data.data.tokens as ActiveTokenEntry[];
+    },
+    refetchInterval: 15_000,
+  });
+
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const handler = () => queryClient.invalidateQueries({ queryKey: ['my-active-tokens'] });
     socket.on('queue:updated', handler);
     socket.on('token:called', handler);
     return () => {
@@ -57,6 +90,8 @@ export function useBookToken() {
     onSuccess: (token) => {
       toast.success(`Token ${token.tokenCode} booked!`);
       queryClient.invalidateQueries({ queryKey: ['my-active-token'] });
+      queryClient.invalidateQueries({ queryKey: ['my-active-tokens'] });
+      queryClient.invalidateQueries({ queryKey: ['my-history'] });
     },
     onError: (err) => toast.error(extractErrorMessage(err)),
   });
@@ -71,6 +106,8 @@ export function useCancelToken() {
     onSuccess: () => {
       toast.success('Token cancelled');
       queryClient.invalidateQueries({ queryKey: ['my-active-token'] });
+      queryClient.invalidateQueries({ queryKey: ['my-active-tokens'] });
+      queryClient.invalidateQueries({ queryKey: ['my-history'] });
     },
     onError: (err) => toast.error(extractErrorMessage(err)),
   });
