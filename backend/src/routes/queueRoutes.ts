@@ -16,6 +16,8 @@ router.post(
   queueController.bookToken
 );
 router.get('/tokens/mine/active', authenticate, authorize('student'), queueController.getMyActiveToken);
+// NEW: all active tokens of the student (no limit)
+router.get('/tokens/mine/active-all', authenticate, authorize('student'), queueController.getMyActiveTokens);
 router.get('/tokens/mine/history', authenticate, authorize('student'), queueController.getMyHistory);
 router.delete('/tokens/:id', authenticate, authorize('student'), queueController.cancelMyToken);
 router.get('/tokens/search/:code', authenticate, queueController.searchToken);
