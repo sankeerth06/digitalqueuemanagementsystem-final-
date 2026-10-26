@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { Minus, Plus, ShoppingBag, Star } from 'lucide-react';
+import { CreditCard, Minus, Plus, ShoppingBag, Star, Wallet } from 'lucide-react';
 import { useMenu } from '../../hooks/useMenu';
 import { useBookToken } from '../../hooks/useQueue';
+import { usePayOnline } from '../../hooks/usePayment';
 import { useNavigate } from 'react-router-dom';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { Badge } from '../../components/ui/Badge';
 import { Button } from '../../components/ui/Button';
 import { formatCurrency } from '../../utils/format';
-import { MenuCategory } from '../../types';
+import { MenuCategory, PaymentMethod } from '../../types';
 
 const categories: MenuCategory[] = ['Breakfast', 'Meals', 'Snacks', 'Beverages', 'Combos'];
 
@@ -16,7 +17,9 @@ export function OrderPage() {
   const [activeCategory, setActiveCategory] = useState<MenuCategory | 'All'>('All');
   const [cart, setCart] = useState<Record<string, number>>({});
   const { data: items, isLoading } = useMenu({ availableOnly: true });
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('counter');
   const bookToken = useBookToken();
+  const payOnline = usePayOnline();
   const navigate = useNavigate();
 
   const filtered = useMemo(() => {
@@ -43,8 +46,11 @@ export function OrderPage() {
 
   const handleBook = () => {
     const payload = cartItems.map((c) => ({ menuItemId: c.item._id, quantity: c.qty }));
-    bookToken.mutate(payload, {
-      onSuccess: () => {
+    bookToken.mutate({ items: payload, paymentMethod }, {
+      onSuccess: (token) => {
+        // Simulated online gateway: pay straight away. If it fails, the
+        // dashboard still shows a "Pay now" button for this token.
+        if (paymentMethod === 'online') payOnline.mutate(token._id);
         setCart({});
         navigate('/student');
       },
@@ -132,8 +138,31 @@ export function OrderPage() {
                   <span>Total</span>
                   <span>{formatCurrency(total)}</span>
                 </div>
+                <div className="mt-4">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ink-600/60 dark:text-white/40">Payment</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([
+                      { value: 'online', label: 'Pay online', Icon: CreditCard },
+                      { value: 'counter', label: 'At counter', Icon: Wallet },
+                    ] as const).map(({ value, label, Icon }) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setPaymentMethod(value)}
+                        className={`flex flex-col items-center gap-1 rounded-xl border px-3 py-2.5 text-xs font-medium transition ${
+                          paymentMethod === value
+                            ? 'border-violet-500 bg-violet-500/10 text-violet-600 dark:text-violet-300'
+                            : 'border-black/10 dark:border-white/10 hover:bg-black/5 dark:hover:bg-white/10'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4" />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <Button className="mt-4 w-full" onClick={handleBook} loading={bookToken.isPending}>
-                  Book token
+                  {paymentMethod === 'online' ? `Book & pay ${formatCurrency(total)}` : 'Book token'}
                 </Button>
               </>
             )}
