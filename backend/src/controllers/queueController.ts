@@ -27,9 +27,8 @@ interface BookItemInput {
   quantity: number;
 }
 
-/**
- * Checks whether a MongoDB error is a duplicate-key error.
- */
+type PaymentMethod = 'online' | 'counter';
+
 function isDuplicateKeyError(error: unknown): boolean {
   return (
     typeof error === 'object' &&
@@ -39,10 +38,6 @@ function isDuplicateKeyError(error: unknown): boolean {
   );
 }
 
-/**
- * Creates a token safely.
- * If two orders get the same tokenCode, generate another and retry.
- */
 async function createTokenSafely(data: {
   student: string;
   items: {
@@ -54,6 +49,7 @@ async function createTokenSafely(data: {
   }[];
   totalAmount: number;
   estimatedWaitMinutes: number;
+  paymentMethod: PaymentMethod;
 }) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -66,6 +62,8 @@ async function createTokenSafely(data: {
         items: data.items,
         totalAmount: data.totalAmount,
         estimatedWaitMinutes: data.estimatedWaitMinutes,
+        paymentMethod: data.paymentMethod,
+        paymentStatus: 'pending',
       });
 
       return token;
@@ -82,9 +80,17 @@ async function createTokenSafely(data: {
   );
 }
 
+async function emitQueue() {
+  const queue = await getLiveQueue();
+  getIO()
+    .to('queue-room')
+    .to('tv-room')
+    .to('staff-room')
+    .emit(SOCKET_EVENTS.QUEUE_UPDATED, queue);
+}
+
 /**
- * Student books a new token.
- * A student can now book ANY number of tokens (no limit).
+ * Student books a new token (no limit on number of tokens).
  */
 export const bookToken = asyncHandler(
   async (req: AuthRequest, res: Response) => {
@@ -97,7 +103,10 @@ export const bookToken = asyncHandler(
       );
     }
 
-    const { items }: { items: BookItemInput[] } = req.body;
+    const {
+      items,
+      paymentMethod = 'counter',
+    }: { items: BookItemInput[]; paymentMethod?: PaymentMethod } = req.body;
 
     if (!items || items.length === 0) {
       throw ApiError.badRequest(
@@ -105,11 +114,10 @@ export const bookToken = asyncHandler(
       );
     }
 
-    // NOTE: the "only one active token" check has been removed.
+    if (!['online', 'counter'].includes(paymentMethod)) {
+      throw ApiError.badRequest('Payment method must be online or counter');
+    }
 
-    /**
-     * Get menu items.
-     */
     const menuItemIds = items.map((item) => item.menuItemId);
 
     const menuItems = await MenuItem.find({
@@ -122,9 +130,6 @@ export const bookToken = asyncHandler(
       );
     }
 
-    /**
-     * Prepare token items.
-     */
     const tokenItems = items.map((input) => {
       const menuItem = menuItems.find(
         (item) => item._id.toString() === input.menuItemId
@@ -145,36 +150,25 @@ export const bookToken = asyncHandler(
       };
     });
 
-    /**
-     * Calculate order amount.
-     */
     const totalAmount = tokenItems.reduce(
       (sum, item) => sum + item.price * item.quantity,
       0
     );
 
-    /**
-     * Calculate preparation time.
-     */
     const maxPrepTime = Math.max(
       ...tokenItems.map((item) => item.prepTimeMinutes)
     );
 
     const estimatedWaitMinutes = await estimateWaitMinutes(maxPrepTime);
 
-    /**
-     * Create token safely.
-     */
     const token = await createTokenSafely({
       student: req.user!.id,
       items: tokenItems,
       totalAmount,
       estimatedWaitMinutes,
+      paymentMethod,
     });
 
-    /**
-     * Decrease stock and update popularity counters.
-     */
     await Promise.all(
       tokenItems.map((item) =>
         MenuItem.findByIdAndUpdate(item.menuItem, {
@@ -186,16 +180,7 @@ export const bookToken = asyncHandler(
       )
     );
 
-    /**
-     * Broadcast updated queue.
-     */
-    const queue = await getLiveQueue();
-
-    getIO()
-      .to('queue-room')
-      .to('tv-room')
-      .to('staff-room')
-      .emit(SOCKET_EVENTS.QUEUE_UPDATED, queue);
+    await emitQueue();
 
     getIO()
       .to('queue-room')
@@ -209,9 +194,6 @@ export const bookToken = asyncHandler(
   }
 );
 
-/**
- * Get student's latest active token (kept for compatibility).
- */
 export const getMyActiveToken = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const token = await Token.findOne({
@@ -237,9 +219,6 @@ export const getMyActiveToken = asyncHandler(
   }
 );
 
-/**
- * NEW: Get ALL of the student's active tokens.
- */
 export const getMyActiveTokens = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const tokens = await Token.find({
@@ -263,9 +242,6 @@ export const getMyActiveTokens = asyncHandler(
   }
 );
 
-/**
- * Get student's order history.
- */
 export const getMyHistory = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const tokens = await Token.find({
@@ -281,9 +257,6 @@ export const getMyHistory = asyncHandler(
   }
 );
 
-/**
- * Cancel student's token.
- */
 export const cancelMyToken = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const token = await cancelToken(req.params.id, req.user!.id);
@@ -295,9 +268,6 @@ export const cancelMyToken = asyncHandler(
   }
 );
 
-/**
- * Search token by code.
- */
 export const searchToken = asyncHandler(
   async (req: AuthRequest, res: Response) => {
     const { code } = req.params;
@@ -318,6 +288,65 @@ export const searchToken = asyncHandler(
       success: true,
       data: { token },
     });
+  }
+);
+
+/* =========================
+   PAYMENT
+========================= */
+
+/**
+ * Student pays online (simulated gateway).
+ */
+export const payOnline = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await Token.findById(req.params.id);
+
+    if (!token) throw ApiError.notFound('Token not found');
+
+    if (token.student.toString() !== req.user!.id) {
+      throw ApiError.forbidden('You can only pay for your own token');
+    }
+    if (token.paymentStatus === 'paid') {
+      throw ApiError.badRequest('This token is already paid');
+    }
+    if (['cancelled', 'completed'].includes(token.status)) {
+      throw ApiError.badRequest('This token can no longer be paid');
+    }
+
+    token.paymentMethod = 'online';
+    token.paymentStatus = 'paid';
+    token.paidAt = new Date();
+    token.paymentReference = `PAY-${Date.now()}-${token.tokenCode}`;
+    await token.save();
+
+    await emitQueue();
+
+    res.json({ success: true, data: { token } });
+  }
+);
+
+/**
+ * Staff marks a counter payment as received.
+ */
+export const markPaid = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await Token.findById(req.params.id);
+
+    if (!token) throw ApiError.notFound('Token not found');
+
+    if (token.paymentStatus === 'paid') {
+      throw ApiError.badRequest('This token is already paid');
+    }
+
+    token.paymentStatus = 'paid';
+    token.paidAt = new Date();
+    token.paymentReference = `CNT-${Date.now()}-${token.tokenCode}`;
+    await token.save();
+
+    await emitQueue();
+
+    res.json({ success: true, data: { token } });
   }
 );
 
@@ -373,6 +402,14 @@ export const markReady = asyncHandler(
 
 export const complete = asyncHandler(
   async (req: AuthRequest, res: Response) => {
+    const existing = await Token.findById(req.params.id);
+
+    if (existing && existing.paymentStatus !== 'paid') {
+      throw ApiError.badRequest(
+        'Payment is pending. Collect payment at the counter and mark it paid first.'
+      );
+    }
+
     const token = await completeToken(req.params.id);
 
     res.json({
