@@ -8,6 +8,9 @@ export type TokenStatus =
   | 'cancelled'
   | 'skipped';
 
+export type PaymentMethod = 'online' | 'counter';
+export type PaymentStatus = 'pending' | 'paid';
+
 export interface ITokenItem {
   menuItem: Types.ObjectId;
   name: string;
@@ -24,6 +27,10 @@ export interface IToken extends Document {
   items: ITokenItem[];
   totalAmount: number;
   status: TokenStatus;
+  paymentMethod: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  paidAt?: Date;
+  paymentReference?: string;
   counter?: number;
   estimatedWaitMinutes: number;
   queuedAt: Date;
@@ -61,6 +68,10 @@ const tokenSchema = new Schema<IToken>(
       enum: ['waiting', 'preparing', 'ready', 'completed', 'cancelled', 'skipped'],
       default: 'waiting',
     },
+    paymentMethod: { type: String, enum: ['online', 'counter'], default: 'counter' },
+    paymentStatus: { type: String, enum: ['pending', 'paid'], default: 'pending' },
+    paidAt: { type: Date },
+    paymentReference: { type: String },
     counter: { type: Number },
     estimatedWaitMinutes: { type: Number, default: 0 },
     queuedAt: { type: Date, default: Date.now },
