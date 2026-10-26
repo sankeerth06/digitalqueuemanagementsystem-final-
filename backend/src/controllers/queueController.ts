@@ -20,10 +20,7 @@ import {
   cancelToken,
 } from '../services/queueService';
 
-import {
-  getIO,
-  SOCKET_EVENTS,
-} from '../sockets/index';
+import { getIO, SOCKET_EVENTS } from '../sockets/index';
 
 interface BookItemInput {
   menuItemId: string;
@@ -44,11 +41,7 @@ function isDuplicateKeyError(error: unknown): boolean {
 
 /**
  * Creates a token safely.
- *
- * If two students order at exactly the same time,
- * MongoDB may detect a duplicate tokenCode.
- *
- * In that case we generate another tokenCode and retry.
+ * If two orders get the same tokenCode, generate another and retry.
  */
 async function createTokenSafely(data: {
   student: string;
@@ -64,10 +57,7 @@ async function createTokenSafely(data: {
 }) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      const {
-        code,
-        sequence,
-      } = await generateTokenCode();
+      const { code, sequence } = await generateTokenCode();
 
       const token = await Token.create({
         tokenCode: code,
@@ -75,8 +65,7 @@ async function createTokenSafely(data: {
         student: data.student,
         items: data.items,
         totalAmount: data.totalAmount,
-        estimatedWaitMinutes:
-          data.estimatedWaitMinutes,
+        estimatedWaitMinutes: data.estimatedWaitMinutes,
       });
 
       return token;
@@ -84,9 +73,6 @@ async function createTokenSafely(data: {
       if (!isDuplicateKeyError(error)) {
         throw error;
       }
-
-      // Another order got the same token.
-      // Try again with the next sequence.
       continue;
     }
   }
@@ -98,12 +84,10 @@ async function createTokenSafely(data: {
 
 /**
  * Student books a new token.
+ * A student can now book ANY number of tokens (no limit).
  */
 export const bookToken = asyncHandler(
-  async (
-    req: AuthRequest,
-    res: Response
-  ) => {
+  async (req: AuthRequest, res: Response) => {
     const settings = await getSettings();
 
     if (settings.queuePaused) {
@@ -113,11 +97,7 @@ export const bookToken = asyncHandler(
       );
     }
 
-    const {
-      items,
-    }: {
-      items: BookItemInput[];
-    } = req.body;
+    const { items }: { items: BookItemInput[] } = req.body;
 
     if (!items || items.length === 0) {
       throw ApiError.badRequest(
@@ -125,46 +105,18 @@ export const bookToken = asyncHandler(
       );
     }
 
-    /**
-     * Prevent one student from having
-     * multiple active tokens.
-     */
-    const existingActive =
-      await Token.findOne({
-        student: req.user!.id,
-        status: {
-          $in: [
-            'waiting',
-            'preparing',
-            'ready',
-          ],
-        },
-      });
-
-    if (existingActive) {
-      throw ApiError.conflict(
-        'You already have an active token. Please complete or cancel it first.'
-      );
-    }
+    // NOTE: the "only one active token" check has been removed.
 
     /**
      * Get menu items.
      */
-    const menuItemIds = items.map(
-      (item) => item.menuItemId
-    );
+    const menuItemIds = items.map((item) => item.menuItemId);
 
-    const menuItems =
-      await MenuItem.find({
-        _id: {
-          $in: menuItemIds,
-        },
-      });
+    const menuItems = await MenuItem.find({
+      _id: { $in: menuItemIds },
+    });
 
-    if (
-      menuItems.length !==
-      items.length
-    ) {
+    if (menuItems.length !== items.length) {
       throw ApiError.badRequest(
         'One or more selected menu items could not be found'
       );
@@ -173,422 +125,281 @@ export const bookToken = asyncHandler(
     /**
      * Prepare token items.
      */
-    const tokenItems = items.map(
-      (input) => {
-        const menuItem =
-          menuItems.find(
-            (item) =>
-              item._id.toString() ===
-              input.menuItemId
-          )!;
+    const tokenItems = items.map((input) => {
+      const menuItem = menuItems.find(
+        (item) => item._id.toString() === input.menuItemId
+      )!;
 
-        if (
-          !menuItem.isAvailable ||
-          menuItem.stock <
-            input.quantity
-        ) {
-          throw ApiError.badRequest(
-            `${menuItem.name} is currently unavailable or out of stock`
-          );
-        }
-
-        return {
-          menuItem: menuItem._id,
-          name: menuItem.name,
-          price: menuItem.price,
-          quantity: input.quantity,
-          prepTimeMinutes:
-            menuItem.prepTimeMinutes,
-        };
+      if (!menuItem.isAvailable || menuItem.stock < input.quantity) {
+        throw ApiError.badRequest(
+          `${menuItem.name} is currently unavailable or out of stock`
+        );
       }
-    );
+
+      return {
+        menuItem: menuItem._id,
+        name: menuItem.name,
+        price: menuItem.price,
+        quantity: input.quantity,
+        prepTimeMinutes: menuItem.prepTimeMinutes,
+      };
+    });
 
     /**
      * Calculate order amount.
      */
-    const totalAmount =
-      tokenItems.reduce(
-        (sum, item) =>
-          sum +
-          item.price *
-            item.quantity,
-        0
-      );
+    const totalAmount = tokenItems.reduce(
+      (sum, item) => sum + item.price * item.quantity,
+      0
+    );
 
     /**
      * Calculate preparation time.
      */
-    const maxPrepTime =
-      Math.max(
-        ...tokenItems.map(
-          (item) =>
-            item.prepTimeMinutes
-        )
-      );
+    const maxPrepTime = Math.max(
+      ...tokenItems.map((item) => item.prepTimeMinutes)
+    );
 
-    const estimatedWaitMinutes =
-      await estimateWaitMinutes(
-        maxPrepTime
-      );
+    const estimatedWaitMinutes = await estimateWaitMinutes(maxPrepTime);
 
     /**
      * Create token safely.
      */
-    const token =
-      await createTokenSafely({
-        student: req.user!.id,
-        items: tokenItems,
-        totalAmount,
-        estimatedWaitMinutes,
-      });
+    const token = await createTokenSafely({
+      student: req.user!.id,
+      items: tokenItems,
+      totalAmount,
+      estimatedWaitMinutes,
+    });
 
     /**
-     * Decrease stock and update
-     * popularity/order counters.
+     * Decrease stock and update popularity counters.
      */
     await Promise.all(
-      tokenItems.map(
-        (item) =>
-          MenuItem.findByIdAndUpdate(
-            item.menuItem,
-            {
-              $inc: {
-                stock:
-                  -item.quantity,
-                totalOrders:
-                  item.quantity,
-              },
-            }
-          )
+      tokenItems.map((item) =>
+        MenuItem.findByIdAndUpdate(item.menuItem, {
+          $inc: {
+            stock: -item.quantity,
+            totalOrders: item.quantity,
+          },
+        })
       )
     );
 
     /**
      * Broadcast updated queue.
      */
-    const queue =
-      await getLiveQueue();
+    const queue = await getLiveQueue();
 
     getIO()
       .to('queue-room')
       .to('tv-room')
       .to('staff-room')
-      .emit(
-        SOCKET_EVENTS.QUEUE_UPDATED,
-        queue
-      );
+      .emit(SOCKET_EVENTS.QUEUE_UPDATED, queue);
 
     getIO()
       .to('queue-room')
       .to('staff-room')
-      .emit(
-        SOCKET_EVENTS.TOKEN_CREATED,
-        token
-      );
+      .emit(SOCKET_EVENTS.TOKEN_CREATED, token);
 
     res.status(201).json({
       success: true,
-      data: {
-        token,
-      },
+      data: { token },
     });
   }
 );
 
 /**
- * Get student's active token.
+ * Get student's latest active token (kept for compatibility).
  */
-export const getMyActiveToken =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await Token.findOne({
-          student: req.user!.id,
-          status: {
-            $in: [
-              'waiting',
-              'preparing',
-              'ready',
-            ],
-          },
-        }).sort({
-          createdAt: -1,
-        });
+export const getMyActiveToken = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await Token.findOne({
+      student: req.user!.id,
+      status: { $in: ['waiting', 'preparing', 'ready'] },
+    }).sort({ createdAt: -1 });
 
-      if (!token) {
-        return res.json({
-          success: true,
-          data: {
-            token: null,
-            position: null,
-          },
-        });
-      }
-
-      const {
-        position,
-        peopleAhead,
-      } =
-        await getQueuePositionInfo(
-          token._id.toString()
-        );
-
-      res.json({
+    if (!token) {
+      return res.json({
         success: true,
-        data: {
-          token,
-          position,
-          peopleAhead,
-        },
+        data: { token: null, position: null },
       });
     }
-  );
+
+    const { position, peopleAhead } = await getQueuePositionInfo(
+      token._id.toString()
+    );
+
+    res.json({
+      success: true,
+      data: { token, position, peopleAhead },
+    });
+  }
+);
+
+/**
+ * NEW: Get ALL of the student's active tokens.
+ */
+export const getMyActiveTokens = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const tokens = await Token.find({
+      student: req.user!.id,
+      status: { $in: ['waiting', 'preparing', 'ready'] },
+    }).sort({ createdAt: -1 });
+
+    const withPositions = await Promise.all(
+      tokens.map(async (token) => {
+        const { position, peopleAhead } = await getQueuePositionInfo(
+          token._id.toString()
+        );
+        return { token, position, peopleAhead };
+      })
+    );
+
+    res.json({
+      success: true,
+      data: { tokens: withPositions },
+    });
+  }
+);
 
 /**
  * Get student's order history.
  */
-export const getMyHistory =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const tokens =
-        await Token.find({
-          student: req.user!.id,
-        })
-          .sort({
-            createdAt: -1,
-          })
-          .limit(50);
+export const getMyHistory = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const tokens = await Token.find({
+      student: req.user!.id,
+    })
+      .sort({ createdAt: -1 })
+      .limit(50);
 
-      res.json({
-        success: true,
-        data: {
-          tokens,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { tokens },
+    });
+  }
+);
 
 /**
  * Cancel student's token.
  */
-export const cancelMyToken =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await cancelToken(
-          req.params.id,
-          req.user!.id
-        );
+export const cancelMyToken = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await cancelToken(req.params.id, req.user!.id);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
 /**
  * Search token by code.
  */
-export const searchToken =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const { code } =
-        req.params;
+export const searchToken = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const { code } = req.params;
 
-      const startOfDay =
-        new Date();
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
 
-      startOfDay.setHours(
-        0,
-        0,
-        0,
-        0
-      );
+    const token = await Token.findOne({
+      tokenCode: code.toUpperCase(),
+      createdAt: { $gte: startOfDay },
+    }).populate('student', 'name studentId');
 
-      const token =
-        await Token.findOne({
-          tokenCode:
-            code.toUpperCase(),
-          createdAt: {
-            $gte: startOfDay,
-          },
-        }).populate(
-          'student',
-          'name studentId'
-        );
-
-      if (!token) {
-        throw ApiError.notFound(
-          'No token found with that code today'
-        );
-      }
-
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
+    if (!token) {
+      throw ApiError.notFound('No token found with that code today');
     }
-  );
+
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
 /* =========================
    STAFF ACTIONS
 ========================= */
 
-export const getLiveQueueHandler =
-  asyncHandler(
-    async (
-      _req: AuthRequest,
-      res: Response
-    ) => {
-      const queue =
-        await getLiveQueue();
+export const getLiveQueueHandler = asyncHandler(
+  async (_req: AuthRequest, res: Response) => {
+    const queue = await getLiveQueue();
 
-      res.json({
-        success: true,
-        data: {
-          queue,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { queue },
+    });
+  }
+);
 
-export const getSkippedTokensHandler =
-  asyncHandler(
-    async (
-      _req: AuthRequest,
-      res: Response
-    ) => {
-      const skipped =
-        await getSkippedTokens();
+export const getSkippedTokensHandler = asyncHandler(
+  async (_req: AuthRequest, res: Response) => {
+    const skipped = await getSkippedTokens();
 
-      res.json({
-        success: true,
-        data: {
-          skipped,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { skipped },
+    });
+  }
+);
 
-export const callNext =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const counter =
-        parseInt(
-          req.body.counter,
-          10
-        ) || 1;
+export const callNext = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const counter = parseInt(req.body.counter, 10) || 1;
 
-      const token =
-        await callNextToken(
-          counter
-        );
+    const token = await callNextToken(counter);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
-export const markReady =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await markTokenReady(
-          req.params.id
-        );
+export const markReady = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await markTokenReady(req.params.id);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
-export const complete =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await completeToken(
-          req.params.id
-        );
+export const complete = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await completeToken(req.params.id);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
-export const skip =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await skipToken(
-          req.params.id
-        );
+export const skip = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await skipToken(req.params.id);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
 
-export const recall =
-  asyncHandler(
-    async (
-      req: AuthRequest,
-      res: Response
-    ) => {
-      const token =
-        await recallToken(
-          req.params.id
-        );
+export const recall = asyncHandler(
+  async (req: AuthRequest, res: Response) => {
+    const token = await recallToken(req.params.id);
 
-      res.json({
-        success: true,
-        data: {
-          token,
-        },
-      });
-    }
-  );
+    res.json({
+      success: true,
+      data: { token },
+    });
+  }
+);
