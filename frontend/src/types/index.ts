@@ -40,6 +40,9 @@ export interface TokenItem {
   prepTimeMinutes: number;
 }
 
+export type PaymentMethod = 'online' | 'counter';
+export type PaymentStatus = 'pending' | 'paid';
+
 export interface Token {
   _id: string;
   tokenCode: string;
@@ -48,6 +51,9 @@ export interface Token {
   items: TokenItem[];
   totalAmount: number;
   status: TokenStatus;
+  paymentMethod: PaymentMethod;
+  paymentStatus: PaymentStatus;
+  paymentReference?: string;
   counter?: number;
   estimatedWaitMinutes: number;
   queuedAt: string;
