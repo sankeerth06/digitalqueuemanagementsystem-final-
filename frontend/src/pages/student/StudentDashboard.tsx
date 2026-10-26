@@ -7,6 +7,7 @@ import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
 import { useCancelToken, useMyActiveTokens, useMyHistory, useSearchToken } from '../../hooks/useQueue';
+import { usePayOnline } from '../../hooks/usePayment';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency, formatTime } from '../../utils/format';
 
@@ -15,6 +16,7 @@ export function StudentDashboard() {
   const { data: activeTokens, isLoading } = useMyActiveTokens();
   const { data: history } = useMyHistory();
   const cancelToken = useCancelToken();
+  const payOnline = usePayOnline();
   const searchToken = useSearchToken();
   const [code, setCode] = useState('');
 
@@ -37,6 +39,23 @@ export function StudentDashboard() {
           {activeTokens.map(({ token, position, peopleAhead }) => (
             <div key={token._id} className="space-y-3">
               <TokenCard token={token} position={position} peopleAhead={peopleAhead} />
+              <div className="flex items-center justify-between rounded-xl bg-black/[0.03] dark:bg-white/5 px-4 py-2.5 text-sm">
+                <span>
+                  {formatCurrency(token.totalAmount)} ·{' '}
+                  {token.paymentStatus === 'paid' ? (
+                    <span className="font-semibold text-emerald-600">Paid ({token.paymentMethod})</span>
+                  ) : token.paymentMethod === 'online' ? (
+                    <span className="font-semibold text-amber-600">Online payment pending</span>
+                  ) : (
+                    <span className="font-semibold text-amber-600">Pay at counter</span>
+                  )}
+                </span>
+                {token.paymentStatus !== 'paid' && (
+                  <Button size="sm" onClick={() => payOnline.mutate(token._id)} loading={payOnline.isPending}>
+                    Pay now
+                  </Button>
+                )}
+              </div>
               {token.status === 'waiting' && (
                 <Button variant="secondary" onClick={() => cancelToken.mutate(token._id)} loading={cancelToken.isPending}>
                   Cancel token {token.tokenCode}
