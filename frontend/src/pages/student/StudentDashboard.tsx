@@ -6,13 +6,13 @@ import { EmptyState } from '../../components/ui/EmptyState';
 import { Skeleton } from '../../components/ui/Skeleton';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { useCancelToken, useMyActiveToken, useMyHistory, useSearchToken } from '../../hooks/useQueue';
+import { useCancelToken, useMyActiveTokens, useMyHistory, useSearchToken } from '../../hooks/useQueue';
 import { useAuthStore } from '../../store/authStore';
 import { formatCurrency, formatTime } from '../../utils/format';
 
 export function StudentDashboard() {
   const user = useAuthStore((s) => s.user);
-  const { data, isLoading } = useMyActiveToken();
+  const { data: activeTokens, isLoading } = useMyActiveTokens();
   const { data: history } = useMyHistory();
   const cancelToken = useCancelToken();
   const searchToken = useSearchToken();
@@ -31,18 +31,24 @@ export function StudentDashboard() {
 
       {isLoading && <Skeleton className="h-64 w-full rounded-3xl" />}
 
-      {!isLoading && data?.token && (
-        <div className="space-y-3">
-          <TokenCard token={data.token} position={data.position} peopleAhead={data.peopleAhead} />
-          {data.token.status === 'waiting' && (
-            <Button variant="secondary" onClick={() => cancelToken.mutate(data.token!._id)} loading={cancelToken.isPending}>
-              Cancel this token
-            </Button>
-          )}
+      {!isLoading && !!activeTokens?.length && (
+        <div className="space-y-6">
+          <h2 className="text-sm font-semibold">Your active tokens ({activeTokens.length})</h2>
+          {activeTokens.map(({ token, position, peopleAhead }) => (
+            <div key={token._id} className="space-y-3">
+              <TokenCard token={token} position={position} peopleAhead={peopleAhead} />
+              {token.status === 'waiting' && (
+                <Button variant="secondary" onClick={() => cancelToken.mutate(token._id)} loading={cancelToken.isPending}>
+                  Cancel token {token.tokenCode}
+                </Button>
+              )}
+            </div>
+          ))}
+          <Link to="/student/order" className="btn-primary inline-block">Order more food</Link>
         </div>
       )}
 
-      {!isLoading && !data?.token && (
+      {!isLoading && !activeTokens?.length && (
         <EmptyState
           icon={UtensilsCrossed}
           title="No active token"
