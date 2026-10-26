@@ -26,7 +26,8 @@ import { Skeleton } from '../../components/ui/Skeleton';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../services/api';
-import { SystemSettings } from '../../types';
+import { SystemSettings, Token } from '../../types';
+import { useMarkPaid } from '../../hooks/usePayment';
 
 export function StaffDashboard() {
   const { data: queue, isLoading } = useLiveQueue();
@@ -36,6 +37,7 @@ export function StaffDashboard() {
   const complete = useCompleteToken();
   const skip = useSkipToken();
   const recall = useRecallToken();
+  const markPaid = useMarkPaid();
 
   const [counter, setCounter] = useState(1);
 
@@ -214,17 +216,20 @@ export function StaffDashboard() {
                   </p>
                 </div>
 
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  onClick={() =>
-                    skip.mutate(t._id)
-                  }
-                >
-                  <SkipForward className="h-3.5 w-3.5" />
+                <div className="flex items-center gap-2">
+                  <PaymentControl token={t} onMarkPaid={(id) => markPaid.mutate(id)} loading={markPaid.isPending} />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() =>
+                      skip.mutate(t._id)
+                    }
+                  >
+                    <SkipForward className="h-3.5 w-3.5" />
 
-                  Skip
-                </Button>
+                    Skip
+                  </Button>
+                </div>
               </motion.div>
             ))}
           </div>
@@ -280,7 +285,8 @@ export function StaffDashboard() {
                   </p>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2">
+                  <PaymentControl token={t} onMarkPaid={(id) => markPaid.mutate(id)} loading={markPaid.isPending} />
 
                   {/* Mark Ready */}
                   <Button
@@ -377,7 +383,9 @@ export function StaffDashboard() {
                 </p>
               </div>
 
-              {/* COMPLETE BUTTON */}
+              {/* PAYMENT + COMPLETE */}
+              <div className="flex items-center gap-2">
+              <PaymentControl token={t} onMarkPaid={(id) => markPaid.mutate(id)} loading={markPaid.isPending} />
               <Button
                 size="sm"
                 onClick={() =>
@@ -387,6 +395,7 @@ export function StaffDashboard() {
               >
                 Complete
               </Button>
+              </div>
 
             </motion.div>
           ))}
@@ -413,6 +422,28 @@ export function StaffDashboard() {
       </section>
 
     </div>
+  );
+}
+
+/*
+ * Payment status + "Mark paid" button
+ */
+function PaymentControl({
+  token,
+  onMarkPaid,
+  loading,
+}: {
+  token: Token;
+  onMarkPaid: (id: string) => void;
+  loading: boolean;
+}) {
+  if (token.paymentStatus === 'paid') {
+    return <Badge tone="mint">Paid ({token.paymentMethod})</Badge>;
+  }
+  return (
+    <Button size="sm" variant="secondary" onClick={() => onMarkPaid(token._id)} loading={loading}>
+      Mark paid ₹{token.totalAmount}
+    </Button>
   );
 }
 
