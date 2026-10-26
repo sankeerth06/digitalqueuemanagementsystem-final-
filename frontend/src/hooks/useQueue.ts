@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import toast from 'react-hot-toast';
 import { api, extractErrorMessage } from '../services/api';
 import { getSocket } from '../services/socket';
-import { Token } from '../types';
+import { PaymentMethod, Token } from '../types';
 
 interface ActiveTokenResponse {
   token: Token | null;
@@ -83,8 +83,14 @@ export function useMyHistory() {
 export function useBookToken() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (items: { menuItemId: string; quantity: number }[]) => {
-      const res = await api.post('/queue/tokens', { items });
+    mutationFn: async ({
+      items,
+      paymentMethod,
+    }: {
+      items: { menuItemId: string; quantity: number }[];
+      paymentMethod: PaymentMethod;
+    }) => {
+      const res = await api.post('/queue/tokens', { items, paymentMethod });
       return res.data.data.token as Token;
     },
     onSuccess: (token) => {
