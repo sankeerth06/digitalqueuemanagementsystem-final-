@@ -18,6 +18,7 @@ router.post(
 router.get('/tokens/mine/active', authenticate, authorize('student'), queueController.getMyActiveToken);
 // NEW: all active tokens of the student (no limit)
 router.get('/tokens/mine/active-all', authenticate, authorize('student'), queueController.getMyActiveTokens);
+router.patch('/tokens/:id/pay', authenticate, authorize('student'), queueController.payOnline);
 router.get('/tokens/mine/history', authenticate, authorize('student'), queueController.getMyHistory);
 router.delete('/tokens/:id', authenticate, authorize('student'), queueController.cancelMyToken);
 router.get('/tokens/search/:code', authenticate, queueController.searchToken);
@@ -33,6 +34,7 @@ router.post(
   validate,
   queueController.callNext
 );
+router.patch('/tokens/:id/mark-paid', authenticate, authorize('staff', 'admin'), queueController.markPaid);
 router.patch('/tokens/:id/ready', authenticate, authorize('staff', 'admin'), queueController.markReady);
 router.patch('/tokens/:id/complete', authenticate, authorize('staff', 'admin'), queueController.complete);
 router.patch('/tokens/:id/skip', authenticate, authorize('staff', 'admin'), queueController.skip);
